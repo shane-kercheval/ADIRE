@@ -31,7 +31,7 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip())
 
 
-def _hash_text(text: str) -> str:
+def hash_text(text: str) -> str:
     """SHA-256 hash truncated to 16 hex chars."""
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
@@ -57,7 +57,7 @@ def split_paragraphs(text: str, separator: str = "\n\n") -> list[Paragraph]:
         paragraphs.append(
             Paragraph(
                 text=stripped,
-                hash=_hash_text(normalized),
+                hash=hash_text(normalized),
                 token_count=max(1, len(stripped) // 4),
             ),
         )
@@ -120,4 +120,4 @@ def document_hash(text: str, separator: str = "\n\n") -> str:
     """  # noqa: D213
     parts = [p.strip() for p in text.split(separator)]
     canonical = separator.join(p for p in parts if p)
-    return _hash_text(canonical)
+    return hash_text(canonical)

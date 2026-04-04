@@ -16,7 +16,7 @@ ignore = [
 "tests/*" = [
     # ignore same warnings as above
     "ANN001", "ANN101", "ANN204", "ANN206",
-    "D101", "D102", "D105", "D107", "D203", "D205", "D212", "D401", "D407", "D413",
+    "D101", "D102", "D105", "D107", "D203", "D205", "D212", "D213", "D401", "D407", "D413",
     "PLR0913", "PLR2004",
     # ignore additional warnings
     "ANN202",  # missing-type-annotation
