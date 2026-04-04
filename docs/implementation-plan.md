@@ -135,6 +135,9 @@ class UpdateResult:
     reembedding_rate: float           # chunks_reembedded / total_chunks — what % we had to pay for
     token_savings_rate: float         # 1 - (tokens_reembedded / total_tokens) — what % of token cost we avoided
 
+    # --- Timing ---
+    algorithm_time_ms: float          # wall-clock time of the strategy itself (split, diff, map, re-chunk)
+
     # --- Chunk quality metrics ---
     fragment_count: int               # chunks below 25% of target size
     fragment_ratio: float             # fragment_count / total_chunks
@@ -540,6 +543,9 @@ class ExperimentConfig:
     trials_per_combo: int                   # statistical trials per combination
     chain_length: int                       # number of sequential edits for chain experiments
     seed: int                               # base seed for reproducibility
+    # Latency modeling parameters
+    embedding_batch_size: int               # max chunks per embedding API call (e.g., 100)
+    per_batch_latency_ms: float             # estimated latency per API batch call (e.g., 200ms)
 ```
 
 **Smoke config** (fast validation — use during development and CI):
@@ -555,6 +561,8 @@ SMOKE_CONFIG = ExperimentConfig(
     trials_per_combo=5,
     chain_length=5,
     seed=42,
+    embedding_batch_size=100,
+    per_batch_latency_ms=200.0,
 )
 ```
 
@@ -571,6 +579,8 @@ FULL_CONFIG = ExperimentConfig(
     trials_per_combo=100,
     chain_length=20,
     seed=42,
+    embedding_batch_size=100,
+    per_batch_latency_ms=200.0,
 )
 ```
 
@@ -608,6 +618,12 @@ class TrialResult:
     fragment_ratio: float
     oversized_count: int
     oversized_ratio: float
+
+    # Timing
+    algorithm_time_ms: float          # wall-clock time of the strategy (CPU cost)
+    estimated_api_batches: int        # ceil(chunks_reembedded / batch_size)
+    estimated_api_latency_ms: float   # estimated_api_batches * per_batch_latency_ms
+    estimated_total_latency_ms: float # algorithm_time_ms + estimated_api_latency_ms
 ```
 
 **Runner logic:**
@@ -620,9 +636,10 @@ def run_experiments(config: ExperimentConfig) -> list[TrialResult]:
 The runner should:
 1. For each `(document_size, document_profile)` combination, generate one base document per trial (using `seed + trial_number` for reproducibility).
 2. For each `(edit_type, edit_position, edit_magnitude)` combination, apply the edit to the base document.
-3. Run all five strategies on the `(old_chunks, edited_document)` pair.
-4. Record `TrialResult` for each strategy.
-5. Print progress (e.g., every 1000 trials or every combination).
+3. Run all five strategies on the `(old_chunks, edited_document)` pair. Wrap each strategy call with `time.perf_counter()` to capture `algorithm_time_ms`.
+4. Compute estimated API latency: `estimated_api_batches = ceil(chunks_reembedded / config.embedding_batch_size)`, `estimated_api_latency_ms = estimated_api_batches * config.per_batch_latency_ms`, `estimated_total_latency_ms = algorithm_time_ms + estimated_api_latency_ms`.
+5. Record `TrialResult` for each strategy.
+6. Print progress (e.g., every 1000 trials or every combination).
 
 **Strategy 5 — ADIRE with wide window:**
 
@@ -717,6 +734,10 @@ Create a Jupyter notebook `notebooks/analysis.ipynb`. Helper functions for reusa
 
 9. **Cost savings estimate** (derived chart): Using approximate embedding costs (e.g., $0.00002 per 1K tokens for a typical embedding model), compute estimated dollar savings per edit across document sizes.
 
+10. **Algorithm overhead vs. API latency savings** (stacked bar or line chart, by document size): For each strategy, show `algorithm_time_ms` and `estimated_api_latency_ms` as components of `estimated_total_latency_ms`. This is a key chart — it shows the crossover point where ADIRE's CPU overhead is justified by API latency savings. For small documents, naive may have lower total latency (trivial algorithm + 1 API batch). For large documents, ADIRE should win (moderate algorithm overhead + fewer API batches).
+
+11. **Estimated total latency by document size** (line chart, one line per strategy): The end-to-end latency comparison. Shows at what document size ADIRE becomes faster than naive, accounting for both algorithm CPU cost and embedding API calls.
+
 **The notebook should:**
 - Load the CSV results
 - Produce each visualization
@@ -738,7 +759,9 @@ Keep visualization tests lightweight — test that functions run without errors 
 
 ## Notes for the Implementing Agent
 
-- **No external embedding API calls** are needed for Milestones 1-5. The simulation counts which chunks *would* be re-embedded. Only a future search-quality validation (not in this plan) would need actual embeddings.
+- **No external embedding API calls** are needed. The simulation counts which chunks *would* be re-embedded and models API latency using configurable parameters (`embedding_batch_size`, `per_batch_latency_ms`). Algorithm wall-clock time is measured directly via `time.perf_counter()`. Only a future search-quality validation (not in this plan) would need actual embeddings.
 - **Keep it simple.** The value is in the experimental results, not in a polished library. Prioritize correctness and clear code over abstraction.
 - **The design doc is the spec.** When in doubt about algorithm behavior, refer to the pseudocode and walkthrough example in `docs/adire-anchor-diffed-incremental-re-embedding.md`.
 - **Ask clarifying questions** rather than guessing, especially around: edge cases in the ADIRE dirty-region mapping, how to handle edits that span chunk boundaries, and what "adjacent chunk" means for insertions at document boundaries.
+- **Always use `uv`** for dependency management. Use `uv add <package>` or `uv add <package> --group dev` to add dependencies. Never edit `pyproject.toml` dependency sections directly.
+- **Results format**: Save experiment results as CSV using the standard library `csv` module. Each row is one `TrialResult` (one strategy's metrics for one trial). The analysis notebook loads the CSV into pandas for aggregation and visualization.
