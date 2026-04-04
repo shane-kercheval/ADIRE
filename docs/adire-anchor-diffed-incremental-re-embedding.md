@@ -2,7 +2,7 @@
 
 ## Status: Draft / Future Consideration
 
-This document captures ADIRE — an approach for minimizing unnecessary re-embedding when document content changes. Structural content units serve as stable anchors; diffing the anchor sequences between versions identifies which chunks are affected by an edit, and only those chunks are re-embedded. It is not part of the current implementation plan — the initial embedding pipeline will use a simpler approach (document-level hash check + full re-embed on change). This is documented here for future evaluation, potential proof of concept, or white paper.
+This document captures ADIRE — an approach for minimizing unnecessary re-embedding when document content changes. Structural content units serve as stable anchors; diffing the anchor sequences between versions identifies which chunks are affected by an edit, and only those chunks are re-embedded.
 
 ## Problem
 
@@ -101,39 +101,55 @@ FUNCTION incremental_embed(entity, new_content):
     # ---------------------------------------------------------------
     # Step 3: Diff old vs new paragraph hash sequences
     # ---------------------------------------------------------------
-    # Use a sequence diff (like difflib.SequenceMatcher or similar)
-    # to identify which paragraph hashes were added, removed, or changed.
+    # Use difflib.SequenceMatcher (with autojunk=False for predictable
+    # behavior on hash sequences) to diff the old and new paragraph
+    # hash sequences.
     #
-    # The diff produces operations like:
-    #   EQUAL   [aa11, bb22]          — unchanged paragraphs
-    #   INSERT  [xx99]                — new paragraph inserted
-    #   DELETE  [old_hash]            — paragraph removed
-    #   REPLACE [dd44] -> [dd44_v2]   — paragraph content changed
+    # SequenceMatcher.get_opcodes() returns operations as positional
+    # ranges into both sequences:
+    #   ('equal',   i1, i2, j1, j2)  — old[i1:i2] == new[j1:j2]
+    #   ('insert',  i1, i1, j1, j2)  — new[j1:j2] inserted at old pos i1
+    #   ('delete',  i1, i2, j1, j1)  — old[i1:i2] removed
+    #   ('replace', i1, i2, j1, j2)  — old[i1:i2] replaced by new[j1:j2]
 
-    diff_ops = diff(old_para_hashes, new_para_hashes)
+    opcodes = SequenceMatcher(None, old_para_hashes, new_para_hashes,
+                              autojunk=False).get_opcodes()
 
     # ---------------------------------------------------------------
-    # Step 4: Map changed paragraphs back to affected chunks
+    # Step 4: Map changed positions back to affected chunks
     # ---------------------------------------------------------------
-    # For each diff operation that is not EQUAL, find which old chunk(s)
-    # contain the affected paragraph hashes. Those chunks are "dirty."
+    # IMPORTANT: Use positional indices, not bare hashes. A hash-based
+    # lookup (hash -> chunk_index) breaks when duplicate paragraphs
+    # exist (repeated bullets, boilerplate, "TODO" lines) because
+    # later occurrences overwrite earlier ones in the dict, causing
+    # changes to be attributed to the wrong chunk.
     #
-    # Build a lookup: paragraph_hash -> chunk_index
-    para_to_chunk = {}
+    # Build a positional lookup: old_position -> chunk_index
+    # This is unambiguous regardless of duplicate paragraph text.
+    pos_to_chunk = {}
+    pos = 0
     for chunk in old_chunks:
-        for ph in chunk.paragraph_hashes:
-            para_to_chunk[ph] = chunk.chunk_index
+        for _ in chunk.paragraph_hashes:
+            pos_to_chunk[pos] = chunk.chunk_index
+            pos += 1
 
     dirty_chunk_indices = set()
-    for op in diff_ops:
-        if op.type != EQUAL:
-            # For deletions and replacements, mark the old chunk as dirty
-            for ph in op.old_hashes:
-                dirty_chunk_indices.add(para_to_chunk[ph])
-            # For insertions, mark the chunk adjacent to the insertion point
-            if op.type == INSERT:
-                adjacent_chunk = find_chunk_at_position(op.position, old_chunks)
-                dirty_chunk_indices.add(adjacent_chunk.chunk_index)
+    for (tag, i1, i2, j1, j2) in opcodes:
+        if tag == 'equal':
+            continue
+        # For deletions and replacements, mark chunks owning old[i1:i2]
+        for old_pos in range(i1, i2):
+            dirty_chunk_indices.add(pos_to_chunk[old_pos])
+        # For insertions (i1 == i2), the new content is placed at old
+        # position i1. Dirty the chunk that owns that position so the
+        # inserted paragraphs are included in its dirty region.
+        # If i1 is past the end (append), this is a trailing insertion
+        # handled separately in Step 5.
+        if tag == 'insert' and i1 < len(old_para_hashes):
+            dirty_chunk_indices.add(pos_to_chunk[i1])
+        # For insertions before position 0, chunk 0 is dirtied by the
+        # range logic above (i1=0 maps to chunk 0). For insertions past
+        # the end, they're handled as trailing insertions in Step 5.
 
     # ---------------------------------------------------------------
     # Step 5: Preserve unchanged chunks, re-chunk only dirty regions
@@ -249,33 +265,37 @@ New: [aa11, bb22, xx99,       cc33, dd44_v2,  ee55, ff66]
                   ^^^^              ^^^^^^^^
                   INSERT            REPLACE
 
-Diff operations:
-  EQUAL   [aa11, bb22]
-  INSERT  [xx99]              ← new paragraph
-  EQUAL   [cc33]
-  REPLACE [dd44] → [dd44_v2] ← changed paragraph
-  EQUAL   [ee55, ff66]
+Opcodes (tag, i1, i2, j1, j2):
+  ('equal',   0, 2, 0, 2)   — old[0:2] == new[0:2]  [aa11, bb22]
+  ('insert',  2, 2, 2, 3)   — new[2:3] inserted      [xx99]
+  ('equal',   2, 3, 3, 4)   — old[2:3] == new[3:4]   [cc33]
+  ('replace', 3, 4, 4, 5)   — old[3:4] → new[4:5]    [dd44] → [dd44_v2]
+  ('equal',   4, 6, 5, 7)   — old[4:6] == new[5:7]   [ee55, ff66]
 ```
 
-### Step 4: Map changes to affected chunks
+### Step 4: Map changed positions to affected chunks
 
 ```
-Paragraph → Chunk mapping:
-  aa11 → chunk 0
-  bb22 → chunk 0
-  cc33 → chunk 1
-  dd44 → chunk 1
-  ee55 → chunk 2
-  ff66 → chunk 2
+Positional mapping (old position → chunk):
+  pos 0 (aa11) → chunk 0
+  pos 1 (bb22) → chunk 0
+  pos 2 (cc33) → chunk 1
+  pos 3 (dd44) → chunk 1
+  pos 4 (ee55) → chunk 2
+  pos 5 (ff66) → chunk 2
 
-INSERT xx99: inserted after bb22 (chunk 0), adjacent to cc33 (chunk 1) → chunk 1 is dirty
-REPLACE dd44 → dd44_v2: dd44 is in chunk 1 → chunk 1 is dirty
+INSERT at old pos 2: pos 2 → chunk 1 is dirty
+REPLACE old[3:4]:    pos 3 → chunk 1 is dirty
 
 Dirty chunks: {1}
 Unchanged chunks: {0, 2}
 ```
 
-Both changes land in the same chunk. Only chunk 1 is affected.
+Both changes map to chunk 1. Only chunk 1 is affected.
+
+Note: the positional mapping is used instead of a hash-based mapping to correctly
+handle duplicate paragraphs (e.g., repeated bullets or boilerplate text that share
+the same hash).
 
 ### Step 5: Re-chunk the dirty region
 
@@ -285,6 +305,13 @@ Unchanged:  Chunk 0 [A + B]  → KEEP (embedding preserved)
 Dirty region — old chunk 1 contained [cc33, dd44].
 New paragraphs for this region (with insertions and changes applied):
   [xx99 (150 tokens), cc33 (250 tokens), dd44_v2 (190 tokens)]
+
+Note: cc33 is unchanged, but it is included in the dirty region because its
+containing chunk (chunk 1) was marked dirty. Unchanged paragraphs within a dirty
+chunk still participate in re-chunking — this is the cost of keeping the algorithm
+simple. The granularity of preservation is at the chunk level, not the paragraph
+level. A paragraph whose content didn't change may still end up in a re-embedded
+chunk if it shares a chunk with a paragraph that did change.
 
 Greedy re-chunk this region:
   New chunk 1: [xx99 + cc33] = 400 tokens  → EMBED
@@ -375,12 +402,15 @@ These questions are best answered with real data once the basic embedding pipeli
 
 ## Comparison to Other Approaches
 
-| Approach | Behavior on paragraph insert at top | Unchanged chunks preserved? | Complexity |
-|----------|--------------------------------------|----------------------------|------------|
-| Naive (delete all, re-embed all) | Re-embeds all chunks | No | Trivial |
-| Content hash per chunk (re-chunk from scratch, hash-match) | Re-embeds most chunks (cascade shifts boundaries; may salvage tail chunks by coincidence) | By coincidence only | Low |
-| **ADIRE** (this doc) | Re-embeds only chunks containing changed/inserted paragraphs | Yes, by design | Medium |
-| Content-defined chunking (rolling hash, a la Xet) | Re-embeds only chunks near the edit | Yes, by design | High |
+| Approach | Behavior on paragraph insert at top | Unchanged chunks preserved? | Chunk sizes | Complexity |
+|----------|--------------------------------------|----------------------------|-------------|------------|
+| Naive (delete all, re-embed all) | Re-embeds all chunks | No | Optimal (greedy combining) | Trivial |
+| Paragraph-level reuse (1 paragraph = 1 chunk, hash set lookup) | Re-embeds only the new paragraph | Yes, by design | Uncontrolled (varies with paragraph length) | Low |
+| Chunk-hash match (re-chunk from scratch, hash-match) | Re-embeds most chunks (cascade shifts boundaries) | By coincidence only | Optimal (greedy combining) | Low |
+| **ADIRE** (this doc) | Re-embeds only chunks containing changed/inserted paragraphs | Yes, by design | Optimal (greedy combining) | Medium |
+| Content-defined chunking (rolling hash, a la Xet) | Re-embeds only chunks near the edit | Yes, by design | Statistical (avg controlled, individual varies) | High |
+
+Paragraph-level reuse is the simplest cascade-resistant approach: each paragraph is independently hashed and embedded, so edits never affect other paragraphs. The tradeoff is chunk size — a 20-character heading and a 1500-character prose block both become individual chunks, producing low-quality embeddings for small paragraphs and diluted relevance for large ones. ADIRE's greedy combining preserves both cascade resistance and optimal chunk sizes.
 
 Content-defined chunking (CDC) uses a rolling hash to create boundaries that are inherently stable — insertions only affect nearby boundaries. It's the most cascade-resistant approach but is significantly more complex to implement and harder to reason about. ADIRE gets most of the benefit with less complexity by leveraging natural document structure.
 
@@ -494,9 +524,11 @@ Before building ADIRE into the production pipeline, we should validate the appro
 
 ### Algorithms to compare
 
-1. **Naive (baseline)**: On every edit, discard all chunks and re-chunk/re-embed from scratch.
-2. **Content-hash match**: Re-chunk from scratch, but hash each new chunk and skip embedding if an identical hash exists in the old chunks. This is the "hope for coincidental matches" approach — cascade-sensitive.
-3. **ADIRE (this doc)**: Diff paragraph hashes, identify dirty chunks, re-chunk only the dirty region, preserve unchanged chunks by design.
+1. **Naive (baseline)**: On every edit, discard all chunks and re-chunk/re-embed from scratch. Uses greedy paragraph combining for optimal chunk sizes.
+2. **Paragraph-level reuse**: Each paragraph is its own chunk (no greedy combining). Hash each paragraph independently. On edit, do a set lookup — if a paragraph's hash exists in the old set, reuse its embedding. Fully cascade-resistant but produces highly variable chunk sizes.
+3. **Chunk-hash match**: Re-chunk from scratch with greedy combining (same as naive), then hash each chunk's full text and check if it matches an old chunk. Reuse the embedding if so. This is the "common optimization" — it demonstrates the cascade problem: inserting near the top shifts all downstream chunk boundaries, so most hashes change even though the underlying paragraphs are the same.
+4. **ADIRE (this doc)**: Diff paragraph hashes, identify dirty chunks, re-chunk only the dirty region with greedy combining, preserve unchanged chunks by design. Cascade-resistant with optimal chunk sizes.
+5. **ADIRE (wide window)**: Same as ADIRE, but expands the dirty region to include one neighbor chunk on each side. Trades higher re-embedding cost for better chunk quality (fewer fragments).
 
 ### Metrics to collect
 
@@ -552,11 +584,14 @@ FOR each document in corpus:
                 edited_doc = apply_random_edit(document, edit_type, position)
 
                 # Run all three algorithms
-                naive_result    = naive_rechunk(edited_doc)
-                hash_result     = content_hash_rechunk(edited_doc, initial_chunks)
-                anchored_result = paragraph_anchored_rechunk(edited_doc, initial_chunks)
+                naive_result       = naive_rechunk(edited_doc)
+                para_reuse_result  = paragraph_reuse_rechunk(edited_doc, initial_chunks)
+                chunk_hash_result  = chunk_hash_rechunk(edited_doc, initial_chunks)
+                adire_result       = adire_rechunk(edited_doc, initial_chunks)
+                adire_wide_result  = adire_wide_rechunk(edited_doc, initial_chunks)
 
-                record_metrics(naive_result, hash_result, anchored_result)
+                record_metrics(naive_result, para_reuse_result, chunk_hash_result,
+                               adire_result, adire_wide_result)
 
                 # For edit-chain simulation: use the result as input to next edit
                 # (tests fragmentation accumulation)
@@ -604,17 +639,21 @@ The efficiency simulation above doesn't require actual embedding API calls — i
 
 ### Expected outcomes
 
-**Hypothesis:** For typical edits (typo, sentence add, paragraph insert), ADIRE preserves 80-95% of chunks. Content-hash matching preserves 30-60% (cascade-dependent). Naive preserves 0%.
+**Hypothesis:** For typical edits (typo, sentence add, paragraph insert), ADIRE preserves 80-95% of chunks. Paragraph-level reuse achieves similar preservation rates but with highly variable chunk sizes. Naive preserves 0%.
+
+The key question is whether ADIRE's additional complexity over paragraph-level reuse is justified — both achieve high reuse, but ADIRE produces well-sized chunks via greedy combining while paragraph-level reuse produces one chunk per paragraph.
 
 **What would make ADIRE not worth it:**
 - If most real edits are "section rewrite" type (touching many consecutive paragraphs), the preservation rate drops and the complexity isn't justified.
 - If the structureless blob case is common (many documents have no paragraph structure), the approach degrades to naive for a significant portion of content.
 - If search quality testing shows that fragmented chunks noticeably hurt retrieval, the defrag threshold would need to be aggressive enough that most edits trigger a full re-chunk anyway.
+- If paragraph-level reuse produces comparable retrieval quality despite variable chunk sizes — then the simpler approach wins.
 
 **What would confirm it's worth building:**
 - Preservation rate consistently above 70% for common edit types on documents with 20+ chunks.
 - Edit chains of 20 edits maintain fragment ratio below the defrag threshold.
 - Search quality is indistinguishable from from-scratch chunking.
+- ADIRE's chunk size distribution is meaningfully better than paragraph-level reuse, and that difference translates to better retrieval quality.
 
 ### Implementation notes
 
