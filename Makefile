@@ -1,4 +1,4 @@
-.PHONY: tests app build
+.PHONY: tests build
 
 -include .env
 export
@@ -9,8 +9,8 @@ export
 build:
 	uv sync
 
-app:
-	uv run python ./src/app.py my-command --a 1 --b 2
+# app:
+# 	uv run python -m adire.cli run
 
 linting:
 	uv run ruff check src
