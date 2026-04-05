@@ -26,5 +26,6 @@ ignore = [
     "D404",  # first word of docstring should not be "This"
     "N802",  # invalid-function-name
     "PLR0915",  # too many statements
-    "SIM117"  # nested with statements
+    "SIM117",  # nested with statements
+    "PD901",  # generic df variable name
 ]

@@ -11,7 +11,7 @@ build:
 
 # Run smoke experiments (fast validation — 2 doc sizes, 3 edit types, 5 trials each)
 experiment:
-	uv run python -m adire.cli run -o results.parquet
+	uv run python -m adire.cli run -o results_smoke.parquet
 
 # Run full experiment matrix (all sizes, profiles, edit types, positions, magnitudes, 100 trials)
 experiment-full:

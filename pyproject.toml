@@ -19,6 +19,9 @@ dev = [
     "pip>=25.0.1",
     "ipykernel>=6.29.5",
     "pyarrow>=23.0.1",
+    "pandas>=3.0.2",
+    "matplotlib>=3.10.8",
+    "nbconvert>=7.17.0",
 ]
 
 [tool.hatch.metadata]

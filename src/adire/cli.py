@@ -20,7 +20,7 @@ def main() -> None:
 
 @main.command()
 @click.option("--full", is_flag=True, help="Run the full experiment matrix (slow).")
-@click.option("--output", "-o", default="results.parquet", help="Output Parquet path.")
+@click.option("--output", "-o", default="results_smoke.parquet", help="Output Parquet path.")
 def run(full: bool, output: str) -> None:
     """Run the simulation experiments."""
     config = FULL_CONFIG if full else SMOKE_CONFIG
