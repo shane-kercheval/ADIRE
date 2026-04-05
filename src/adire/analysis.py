@@ -17,6 +17,15 @@ STRATEGY_LABELS = {
 # Strategies with the same chunking granularity (greedy combining to ~512 tokens)
 SAME_GRANULARITY_STRATEGIES = ["naive", "chunk_hash", "adire", "adire_wide_window"]
 
+# Fixed colors so each strategy is always the same color regardless of which subset is shown
+STRATEGY_COLORS = {
+    "naive": "#d62728",           # red
+    "paragraph_reuse": "#ff7f0e", # orange
+    "chunk_hash": "#2ca02c",      # green
+    "adire": "#1f77b4",           # blue
+    "adire_wide_window": "#9467bd",  # purple
+}
+
 # Approximate embedding cost per 1K tokens (typical embedding model, e.g. text-embedding-3-small)
 COST_PER_1K_TOKENS = 0.00002
 
