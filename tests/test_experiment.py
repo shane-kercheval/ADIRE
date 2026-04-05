@@ -3,6 +3,8 @@
 from adire.document_generator import LONG_PARAGRAPHS, MIXED
 from adire.edit_simulator import EditPosition, EditType
 from adire.experiment import (
+    DEFAULT_CHAIN_EDIT_WEIGHTS,
+    DEFAULT_CHAIN_MAGNITUDES,
     ExperimentConfig,
     read_results_csv,
     run_chain_experiments,
@@ -16,15 +18,17 @@ def _minimal_config(**overrides: object) -> ExperimentConfig:
     defaults: dict[str, object] = {
         "document_sizes": [5_000],
         "document_profiles": [MIXED],
-        "edit_types": [EditType.TYPO_FIX],
-        "edit_positions": [EditPosition.MIDDLE],
-        "edit_magnitudes": [1],
         "max_tokens": 512,
-        "trials_per_combo": 5,
-        "chain_length": 5,
         "seed": 42,
         "embedding_batch_size": 100,
         "per_batch_latency_ms": 200.0,
+        "edit_types": [EditType.TYPO_FIX],
+        "edit_positions": [EditPosition.MIDDLE],
+        "edit_magnitudes": [1],
+        "trials_per_combo": 5,
+        "chain_length": 5,
+        "chain_edit_weights": DEFAULT_CHAIN_EDIT_WEIGHTS,
+        "chain_magnitudes": DEFAULT_CHAIN_MAGNITUDES,
     }
     defaults.update(overrides)
     return ExperimentConfig(**defaults)
@@ -140,6 +144,20 @@ class TestChainExperiments:
         for r in results:
             if r.edit_type in {"append", "scattered_edits"}:
                 assert r.edit_position == "middle"
+
+    def test_chain_same_edit_sequence_across_pairs(self):
+        config = _minimal_config(
+            document_sizes=[5_000, 25_000],
+            chain_length=5,
+        )
+        results = run_chain_experiments(config)
+        # Group by (doc_size, step) and check edit_type is the same
+        size_5k = [r for r in results if r.document_size == 5000 and r.strategy == "naive"]
+        size_25k = [r for r in results if r.document_size == 25000 and r.strategy == "naive"]
+        assert len(size_5k) == len(size_25k) == 5
+        for a, b in zip(size_5k, size_25k):
+            assert a.edit_type == b.edit_type
+            assert a.edit_magnitude == b.edit_magnitude
 
 
 # ---------------------------------------------------------------------------

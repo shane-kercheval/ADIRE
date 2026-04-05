@@ -46,60 +46,84 @@ STRATEGIES: list[tuple[str, type]] = [
 ]
 
 # Realistic edit weights for chain experiments.
-CHAIN_EDIT_WEIGHTS: list[tuple[EditType, float]] = [
+DEFAULT_CHAIN_EDIT_WEIGHTS: list[tuple[EditType, float]] = [
     (EditType.TYPO_FIX, 0.30),
     (EditType.SENTENCE_ADDITION, 0.25),
-    (EditType.PARAGRAPH_INSERT, 0.15),
+    (EditType.PARAGRAPH_INSERT, 0.10),
     (EditType.PARAGRAPH_DELETE, 0.05),
     (EditType.SECTION_REWRITE, 0.05),
+    (EditType.SECTION_INSERT, 0.05),
     (EditType.APPEND, 0.15),
     (EditType.SCATTERED_EDITS, 0.05),
 ]
 
+DEFAULT_CHAIN_MAGNITUDES: list[int] = [1, 1, 1, 2, 3]
+
 
 @dataclass
 class ExperimentConfig:
-    """Configuration for a simulation run."""
+    """Configuration for a simulation run.
 
+    Single-edit matrix fields: edit_types, edit_positions, edit_magnitudes,
+    trials_per_combo. These control the systematic sweep in run_experiments().
+
+    Chain experiment fields: chain_length, chain_edit_weights, chain_magnitudes.
+    Chains simulate realistic editing patterns with weighted random selection,
+    not a systematic matrix. The edit distribution is configured separately
+    because the chain experiment asks a different question (fragmentation over
+    time) than the single-edit experiment (cost savings per edit type).
+    """  # noqa: D213
+
+    # --- Shared ---
     document_sizes: list[int]
     document_profiles: list[DocumentProfile]
-    edit_types: list[EditType]
-    edit_positions: list[EditPosition]
-    edit_magnitudes: list[int]
     max_tokens: int
-    trials_per_combo: int
-    chain_length: int
     seed: int
     embedding_batch_size: int
     per_batch_latency_ms: float
+
+    # --- Single-edit matrix ---
+    edit_types: list[EditType]
+    edit_positions: list[EditPosition]
+    edit_magnitudes: list[int]
+    trials_per_combo: int
+
+    # --- Chain experiments ---
+    chain_length: int
+    chain_edit_weights: list[tuple[EditType, float]]
+    chain_magnitudes: list[int]
 
 
 SMOKE_CONFIG = ExperimentConfig(
     document_sizes=[SMALL, LARGE],
     document_profiles=[MIXED, LONG_PARAGRAPHS],
-    edit_types=[EditType.TYPO_FIX, EditType.PARAGRAPH_INSERT, EditType.SECTION_REWRITE],
-    edit_positions=[EditPosition.MIDDLE],
-    edit_magnitudes=[1],
     max_tokens=512,
-    trials_per_combo=5,
-    chain_length=5,
     seed=42,
     embedding_batch_size=100,
     per_batch_latency_ms=200.0,
+    edit_types=[EditType.TYPO_FIX, EditType.PARAGRAPH_INSERT, EditType.SECTION_REWRITE],
+    edit_positions=[EditPosition.MIDDLE],
+    edit_magnitudes=[1],
+    trials_per_combo=5,
+    chain_length=5,
+    chain_edit_weights=DEFAULT_CHAIN_EDIT_WEIGHTS,
+    chain_magnitudes=DEFAULT_CHAIN_MAGNITUDES,
 )
 
 FULL_CONFIG = ExperimentConfig(
     document_sizes=[TINY, SMALL, MEDIUM, LARGE, MAX_SIZE],
     document_profiles=ALL_PROFILES,
-    edit_types=list(EditType),
-    edit_positions=list(EditPosition),
-    edit_magnitudes=[1, 3, 10],
     max_tokens=512,
-    trials_per_combo=100,
-    chain_length=20,
     seed=42,
     embedding_batch_size=100,
     per_batch_latency_ms=200.0,
+    edit_types=list(EditType),
+    edit_positions=list(EditPosition),
+    edit_magnitudes=[1, 3, 10],
+    trials_per_combo=100,
+    chain_length=20,
+    chain_edit_weights=DEFAULT_CHAIN_EDIT_WEIGHTS,
+    chain_magnitudes=DEFAULT_CHAIN_MAGNITUDES,
 )
 
 
@@ -307,16 +331,15 @@ def run_chain_experiments(config: ExperimentConfig) -> list[TrialResult]:
     """Run sequential edit chains to measure fragmentation accumulation."""
     results: list[TrialResult] = []
 
-    # Intentionally shared across (doc_size, profile) pairs: using the same edit
-    # sequence makes results comparable across document configurations by isolating
-    # the effect of document properties from the effect of edit sequence variation.
-    rng = random.Random(config.seed)
-
-    edit_types = [et for et, _ in CHAIN_EDIT_WEIGHTS]
-    edit_weights = [w for _, w in CHAIN_EDIT_WEIGHTS]
+    edit_types = [et for et, _ in config.chain_edit_weights]
+    edit_weights = [w for _, w in config.chain_edit_weights]
 
     for doc_size in config.document_sizes:
         for profile in config.document_profiles:
+            # Reset RNG per pair so every (doc_size, profile) gets the same
+            # edit sequence — isolates the effect of document properties.
+            rng = random.Random(config.seed)
+
             doc = generate_document(profile, doc_size, seed=config.seed)
             old_paras = split_paragraphs(doc)
             old_chunks = greedy_chunk(old_paras, config.max_tokens)
@@ -331,15 +354,14 @@ def run_chain_experiments(config: ExperimentConfig) -> list[TrialResult]:
                     edit_types, weights=edit_weights, k=1,
                 )[0]
                 position = rng.choice(list(EditPosition))
-                magnitude = rng.choice([1, 1, 1, 2, 3])
+                magnitude = rng.choice(config.chain_magnitudes)
 
-                # Normalize position for position-independent edit types
                 if edit_type in POSITION_INDEPENDENT_TYPES:
                     position = EditPosition.MIDDLE
 
                 edit_spec = EditSpec(edit_type, position, magnitude)
                 edited = apply_edit(
-                    current_doc, edit_spec, seed=config.seed + step,
+                    current_doc, edit_spec, seed=config.seed + step + 10000,
                 )
                 new_paras = split_paragraphs(edited)
                 para_count_before = len(split_paragraphs(current_doc))
