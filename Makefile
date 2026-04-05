@@ -1,4 +1,4 @@
-.PHONY: tests build
+.PHONY: tests build experiment experiment-full
 
 -include .env
 export
@@ -9,8 +9,11 @@ export
 build:
 	uv sync
 
-# app:
-# 	uv run python -m adire.cli run
+experiment:
+	uv run python -m adire.cli run -o results.csv
+
+experiment-full:
+	uv run python -m adire.cli run --full -o results.csv
 
 linting:
 	uv run ruff check src

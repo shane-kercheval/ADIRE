@@ -673,6 +673,8 @@ uv run python src/app.py run --output results.csv
 uv run python src/app.py run --config custom_config.json --output results.csv
 ```
 
+NOTE: Add the necessary CLI to the Makefile. Update readme to document how to run the experiments.
+
 ### Testing Strategy
 
 Create `tests/test_experiment.py`.
