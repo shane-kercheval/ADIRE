@@ -174,10 +174,11 @@ vignettes/*.pdf
 *.Rproj
 .DS_Store
 
-# exclude pickle, RDS (R), and csv files by default.
+# exclude pickle, RDS (R), csv, and parquet files by default.
 *.pkl
 *.csv
 *.RDS
+*.parquet
 
 renv/*
 .Rprofile
