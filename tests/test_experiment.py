@@ -6,10 +6,10 @@ from adire.experiment import (
     DEFAULT_CHAIN_EDIT_WEIGHTS,
     DEFAULT_CHAIN_MAGNITUDES,
     ExperimentConfig,
-    read_results_csv,
+    read_results,
     run_chain_experiments,
     run_experiments,
-    write_results_csv,
+    write_results,
 )
 
 
@@ -175,16 +175,16 @@ class TestReproducibility:
             assert a.chunks_reused == b.chunks_reused
             assert a.tokens_reembedded == b.tokens_reembedded
 
-    def test_csv_round_trip(self, tmp_path):
+    def test_parquet_round_trip(self, tmp_path):
         config = _minimal_config(trials_per_combo=2)
         results = run_experiments(config)
 
-        path = tmp_path / "results.csv"
-        write_results_csv(results, path)
-        rows = read_results_csv(path)
+        path = tmp_path / "results.parquet"
+        write_results(results, path)
+        rows = read_results(path)
         assert len(rows) == len(results)
         assert rows[0]["strategy"] in {"naive", "paragraph_reuse", "chunk_hash", "adire", "adire_wide_window"}
-        assert rows[0]["document_size"] == "5000"
+        assert rows[0]["document_size"] == 5000  # Parquet preserves int type
         assert rows[0]["experiment_type"] == "single"
 
 

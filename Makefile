@@ -9,11 +9,13 @@ export
 build:
 	uv sync
 
+# Run smoke experiments (fast validation — 2 doc sizes, 3 edit types, 5 trials each)
 experiment:
-	uv run python -m adire.cli run -o results.csv
+	uv run python -m adire.cli run -o results.parquet
 
+# Run full experiment matrix (all sizes, profiles, edit types, positions, magnitudes, 100 trials)
 experiment-full:
-	uv run python -m adire.cli run --full -o results.csv
+	uv run python -m adire.cli run --full -o results.parquet
 
 linting:
 	uv run ruff check src

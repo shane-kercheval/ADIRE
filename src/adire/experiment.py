@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import csv
 import math
 import random
-from dataclasses import asdict, dataclass, fields
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 from adire.chunking import Chunk, document_hash, greedy_chunk, split_paragraphs
@@ -407,19 +406,22 @@ def run_chain_experiments(config: ExperimentConfig) -> list[TrialResult]:
     return results
 
 
-def write_results_csv(results: list[TrialResult], path: str | Path) -> None:
-    """Write trial results to a CSV file."""
+def write_results(results: list[TrialResult], path: str | Path) -> None:
+    """Write trial results to a Parquet file (preserves types, compact)."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
     if not results:
         return
     fieldnames = [f.name for f in fields(TrialResult)]
-    with Path(path).open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for r in results:
-            writer.writerow(asdict(r))
+    columns = {name: [getattr(r, name) for r in results] for name in fieldnames}
+    table = pa.table(columns)
+    pq.write_table(table, str(path))
 
 
-def read_results_csv(path: str | Path) -> list[dict[str, str]]:
-    """Read trial results from a CSV file. Returns list of dicts (all values as strings)."""
-    with Path(path).open() as f:
-        return list(csv.DictReader(f))
+def read_results(path: str | Path) -> list[dict[str, object]]:
+    """Read trial results from a Parquet file. Returns list of dicts with native types."""
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(str(path))
+    return table.to_pylist()

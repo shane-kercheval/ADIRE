@@ -115,6 +115,33 @@ The simulation answers several questions: Does chunk-hash matching actually fail
 - [`docs/adire-anchor-diffed-incremental-re-embedding.md`](docs/adire-anchor-diffed-incremental-re-embedding.md) — full design document with algorithm pseudocode, walkthrough examples, and research context
 - [`docs/implementation-plan.md`](docs/implementation-plan.md) — implementation plan for the simulation framework
 
+## Running Experiments
+
+The simulation runs two types of experiments:
+
+**Single-edit matrix** — A systematic sweep across every combination of (document size, profile, edit type, position, magnitude). Each trial is independent: generate a document, apply one edit, run all 5 strategies, record metrics. This answers: "for a given edit on a given document, how much does each strategy save?"
+
+**Edit chains** — Sequential edits on the same document. Apply 20 edits in sequence (weighted by realistic frequency: 30% typo fixes, 25% sentence additions, etc.), feeding each strategy's output chunks back as input to the next step. Every (doc_size, profile) pair gets the same edit sequence for controlled comparability. This answers: "does fragmentation accumulate over time?"
+
+```bash
+# Smoke run — fast validation (~1s, 400 rows)
+# 2 doc sizes, 2 profiles, 3 edit types, 5 trials, 5-step chains
+make experiment
+
+# Full experiment matrix (slow — all dimensions, 100 trials per combo)
+# 5 doc sizes, 6 profiles, 8 edit types, 3 positions, 3 magnitudes, 20-step chains
+make experiment-full
+```
+
+Results are written to `results.parquet`. Each row is one strategy's metrics for one trial. The `experiment_type` column (`"single"` or `"chain"`) distinguishes the two experiment types.
+
+You can also run the CLI directly for custom output paths:
+
+```bash
+uv run python -m adire.cli run -o my_results.parquet
+uv run python -m adire.cli run --full -o my_results.parquet
+```
+
 ## Development
 
 - `make tests` — run linting and tests

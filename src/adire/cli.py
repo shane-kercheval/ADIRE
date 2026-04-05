@@ -9,7 +9,7 @@ from adire.experiment import (
     SMOKE_CONFIG,
     run_chain_experiments,
     run_experiments,
-    write_results_csv,
+    write_results,
 )
 
 
@@ -20,7 +20,7 @@ def main() -> None:
 
 @main.command()
 @click.option("--full", is_flag=True, help="Run the full experiment matrix (slow).")
-@click.option("--output", "-o", default="results.csv", help="Output CSV path.")
+@click.option("--output", "-o", default="results.parquet", help="Output Parquet path.")
 def run(full: bool, output: str) -> None:
     """Run the simulation experiments."""
     config = FULL_CONFIG if full else SMOKE_CONFIG
@@ -36,7 +36,7 @@ def run(full: bool, output: str) -> None:
     click.echo(f"  {len(chain_results)} chain results collected.")
 
     all_results = results + chain_results
-    write_results_csv(all_results, output)
+    write_results(all_results, output)
     click.echo(f"Results written to {output} ({len(all_results)} rows).")
 
 
