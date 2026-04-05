@@ -112,6 +112,7 @@ The simulation answers several questions: Does chunk-hash matching actually fail
 
 ## Documentation
 
+- [`docs/analysis-results.md`](docs/analysis-results.md) — simulation results, key findings, and strategy recommendations
 - [`docs/adire-anchor-diffed-incremental-re-embedding.md`](docs/adire-anchor-diffed-incremental-re-embedding.md) — full design document with algorithm pseudocode, walkthrough examples, and research context
 - [`docs/implementation-plan.md`](docs/implementation-plan.md) — implementation plan for the simulation framework
 
